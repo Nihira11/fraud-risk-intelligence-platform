@@ -1,5 +1,4 @@
-data/raw/
-data/processed/
+data/raw/fraudTrain.csv
 models/*.pkl
 .env
 __pycache__/
