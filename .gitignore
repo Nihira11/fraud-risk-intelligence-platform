@@ -1,6 +1,7 @@
 data/raw/fraudTrain.csv
-models/*.pkl
 .env
+models/*.pkl
+!models/xgb_fraud.pkl
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
