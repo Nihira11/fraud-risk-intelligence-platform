@@ -3,58 +3,68 @@ import numpy as np
 import joblib
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_curve
 from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
 
 from features import load_feature_matrix, time_split, FEATURES
 
-RULE_RECALL = 0.439   # Phase 3 baseline, for a like-for-like comparison
+RULE_RECALL = 0.439
 
-def evaluate(name, y_true, scores):
-    pr_auc  = average_precision_score(y_true, scores)
-    roc_auc = roc_auc_score(y_true, scores)
-    prec, rec, _ = precision_recall_curve(y_true, scores)
-    idx = np.argmin(np.abs(rec - RULE_RECALL))     # precision at the rules' recall
-    print(f"{name:20s} PR-AUC={pr_auc:.3f}  ROC-AUC={roc_auc:.3f}  "
-          f"precision@{rec[idx]*100:.0f}%recall={prec[idx]*100:.1f}%")
-    return pr_auc
+def prec_at_recall(y, scores, target=RULE_RECALL):
+    prec, rec, _ = precision_recall_curve(y, scores)
+    return prec[np.argmin(np.abs(rec - target))]
+
+def evaluate(name, y, scores):
+    ap, roc = average_precision_score(y, scores), roc_auc_score(y, scores)
+    p = prec_at_recall(y, scores)
+    print(f"{name:24s} PR-AUC={ap:.3f}  ROC-AUC={roc:.3f}  precision@44%recall={p*100:.1f}%")
+    return ap
 
 def main():
-    df = load_feature_matrix()
-    train, test = time_split(df)
-    X_train, y_train = train[FEATURES], train["is_fraud"]
-    X_test,  y_test  = test[FEATURES],  test["is_fraud"]
+    train, test = time_split(load_feature_matrix())
+    Xtr, ytr = train[FEATURES], train["is_fraud"]
+    Xte, yte = test[FEATURES], test["is_fraud"]
+    spw = (ytr == 0).sum() / (ytr == 1).sum()
+    print(f"Model bake-off  (train {len(Xtr):,} / test {len(Xte):,})\n")
 
-    # Logistic Regression – scaled + class-balanced
-    logreg = make_pipeline(
-        StandardScaler(),
-        LogisticRegression(class_weight="balanced", max_iter=1000),
-    )
-    logreg.fit(X_train, y_train)
-    evaluate("LogisticRegression", y_test, logreg.predict_proba(X_test)[:, 1])
+    # 1. Logistic Regression – linear baseline
+    lr = make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=1000))
+    lr.fit(Xtr, ytr)
+    evaluate("Logistic Regression", yte, lr.predict_proba(Xte)[:, 1])
 
-    # XGBoost – imbalance via scale_pos_weight
-    spw = (y_train == 0).sum() / (y_train == 1).sum()
-    xgb = XGBClassifier(
-        n_estimators=300, max_depth=6, learning_rate=0.1,
-        scale_pos_weight=spw, eval_metric="aucpr",
-        tree_method="hist", n_jobs=-1,
-    )
-    xgb.fit(X_train, y_train)
-    evaluate("XGBoost", y_test, xgb.predict_proba(X_test)[:, 1])
+    # 2. Random Forest – bagging ensemble
+    rf = RandomForestClassifier(n_estimators=200, max_depth=12, class_weight="balanced",
+                                n_jobs=-1, random_state=42)
+    rf.fit(Xtr, ytr)
+    evaluate("Random Forest", yte, rf.predict_proba(Xte)[:, 1])
 
-    print("\nRule baseline (Phase 3):       precision=17.0%  recall=43.9%")
+    # 3. XGBoost – gradient boosting
+    xgb = XGBClassifier(n_estimators=300, max_depth=6, learning_rate=0.1, scale_pos_weight=spw,
+                        eval_metric="aucpr", tree_method="hist", n_jobs=-1)
+    xgb.fit(Xtr, ytr)
+    evaluate("XGBoost", yte, xgb.predict_proba(Xte)[:, 1])
 
-    # Feature importance
-    print("\nTop features (XGBoost):")
-    for i in np.argsort(xgb.feature_importances_)[::-1][:6]:
-        print(f"  {FEATURES[i]:18s} {xgb.feature_importances_[i]:.3f}")
+    # 4. LightGBM – gradient boosting
+    lgb = LGBMClassifier(n_estimators=400, learning_rate=0.05, scale_pos_weight=spw,
+                         n_jobs=-1, verbose=-1)
+    lgb.fit(Xtr, ytr)
+    evaluate("LightGBM", yte, lgb.predict_proba(Xte)[:, 1])
 
-    # Save for the dashboard – store feature order alongside the model
+    # 5. Isolation Forest – UNSUPERVISED anomaly baseline (never sees the labels)
+    iso = IsolationForest(n_estimators=200, contamination=float(ytr.mean()),
+                          random_state=42, n_jobs=-1)
+    iso.fit(Xtr)
+    evaluate("Isolation Forest (unsup.)", yte, -iso.score_samples(Xte))
+
+    print(f"\nRule baseline:           precision=17.0%  recall=43.9%")
+
+    # keep XGBoost as the production model
     os.makedirs("models", exist_ok=True)
-    joblib.dump({"model": xgb, "features": FEATURES}, "models/xgb_fraud.pkl")
-    print("\nSaved models/xgb_fraud.pkl")
+    joblib.dump({"model": xgb, "features": FEATURES, "name": "XGBoost"}, "models/xgb_fraud.pkl")
+    print("\nSaved models/xgb_fraud.pkl (XGBoost)")
 
 if __name__ == "__main__":
     main()
