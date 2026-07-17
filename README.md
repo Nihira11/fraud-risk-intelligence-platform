@@ -1,6 +1,8 @@
 # Fraud Risk Intelligence Platform
 
-A SQL-first fraud detection and risk intelligence platform that combines PostgreSQL feature engineering, an XGBoost fraud model, a transparent SQL rule engine baseline and an expected-loss alert prioritisation system. The final output is delivered through a live operational dashboard designed to simulate a real-world fraud investigation workflow.
+A complete fraud detection and investigation platform built with PostgreSQL, Python, XGBoost and interactive dashboards.
+
+The platform scores credit-card transactions, identifies suspicious activity and ranks alerts by their expected financial loss. This helps investigators focus on the transactions that create the highest risk instead of reviewing alerts in a random order.
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791)
@@ -12,13 +14,13 @@ A SQL-first fraud detection and risk intelligence platform that combines Postgre
 - [Live dashboard](https://nihira11.github.io/fraud-risk-intelligence-platform/dashboard/)
 - [Tableau Public](https://public.tableau.com/app/profile/nihira.sharma/viz/FraudRiskIntelligencePlatform/Fraud_Risk_Intelligence?publish=yes)
 - [Presentation (PDF)](presentation.pdf)
-- [Dataset (Sparkov, Kaggle)](https://www.kaggle.com/datasets/kartik2112/fraud-detection)
+- [Sparkov Dataset on Kaggle](https://www.kaggle.com/datasets/kartik2112/fraud-detection)
 
 
 ![Fraud Risk Intelligence Platform dashboard](screenshots/dashboard_main.png)
 <p align="center">
   <sub><em>
-  Live HTML fraud-risk dashboard for the 198,982-transaction hold-out, combining model performance KPIs, an alert-budget recall–precision curve, fraud trend analysis, category and amount patterns and a risk-ranked analyst queue for prioritizing high-value investigations.
+    The live dashboard analyses 198,982 test transactions. It shows model performance, fraud trends, spending patterns and a ranked alert queue that helps investigators focus on high-value risks.
   </em></sub>
 </p>
 
@@ -27,11 +29,19 @@ A SQL-first fraud detection and risk intelligence platform that combines Postgre
 
 ## Overview
 
-Credit-card fraud represents only a small percentage of overall transactions but it can create significant financial losses. The challenge is not simply identifying fraud but identifying it accurately enough that a limited team of investigators can review alerts efficiently. This project builds an end-to-end fraud detection workflow that scores every transaction, ranks suspicious activity into a prioritised review queue and measures the trade-off between analyst effort, fraud detection rates and recovered fraud exposure.
+Credit-card fraud makes up only a small percentage of overall transactions but it can still cause major financial losses. The challenge is not simply finding fraud. A fraud system must also limit false alarms and help investigators decide which alerts should be reviewed first.
 
-The project follows a deliberately **SQL-first** architecture. All feature engineering is performed inside PostgreSQL while Python is used only for model training and scoring. This approach mirrors how many production analytics pipelines operate and keeps the heavy data processing inside the database layer.
+This project creates a complete fraud detection process that:
 
-A eight-slide summary deck (problem, architecture, results, and the expected-loss idea) is included as **[presentation.pdf](presentation.pdf)** for a quick walkthrough.
+- Scores every transaction using a machine learning model
+- Identifies suspicious transactions
+- Ranks alerts by expected financial loss
+- Measures how much fraud can be found with a limited investigation budget
+- Shows the results through operational and analytical dashboards
+
+The project uses a **SQL-first** structure. PostgreSQL handles the main data processing and feature engineering, while Python is mainly used to train the models and score transactions. This is similar to many real analytics systems where large amounts of data are processed inside the database before being passed to a machine learning model.
+
+An eight-slide summary deck covering the problem, system structure, results and expected-loss method is available in **[presentation.pdf](presentation.pdf)**.
 
 ---
 
@@ -39,28 +49,75 @@ A eight-slide summary deck (problem, architecture, results, and the expected-los
 
 The machine-learning models are evaluated against a transparent SQL rule engine using a **time-based train/test split** (training before 2020-04-01 and testing on Apr–Jun 2020). This creates a more realistic evaluation by ensuring future transactions are scored using information available only from the past.
 
+This project is designed as a decision tool for a fraud investigation team, not only as a fraud prediction model.
+
+### Expected-Loss Alert Ranking
+
+The platform ranks alerts using:
+```
+Expected Loss = Probability of Fraud × Transaction Amount
+```
+This method considers both the chance of fraud and the amount of money at risk.
+
+Reviewing the top **1,000 alerts** from a total of 2,730:
+
+- Finds around **75% of all fraud cases**
+- Covers approximately **$529,600**
+- Captures about **85% of the total fraud-dollar exposure**
+
+This means a small investigation team can focus on the alerts with the greatest financial importance instead of reviewing every alert equally.
+
+### Model Comparison
+
+Several machine learning models were compared with a transparent SQL rule engine.
+
+A time-based train and test split was used:
+
+- **Training data:** Transactions before 1 April 2020
+- **Test data:** Transactions from April to June 2020
+
+This creates a more realistic test because the models are trained using past transactions and evaluated on future transactions.
+
 | Model | PR-AUC | Precision @ 43.9% recall |
 |---|---|---|
 | **XGBoost** (production) | **0.883** | **99.2%** |
 | LightGBM | 0.870 | 98.5% |
 | Random Forest | 0.846 | 98.3% |
 | Logistic Regression | 0.402 | 53.5% |
-| Isolation Forest (unsupervised) | 0.326 | 45.8% |
-| Rule engine (SQL baseline) | — | 17.0% |
+| Isolation Forest | 0.326 | 45.8% |
+| SQL Rule engine (baseline) | — | 17.0% |
 
-- At the rule engine's recall level of **43.9%**, the XGBoost model improves precision from **17% to 99.2%**, dramatically reducing false-positive alerts.
-- Reviewing the top **1,000 of 2,730** ranked alerts captures approximately **75% of all fraud cases** while recovering around **$529,600 (85%)** of fraud-dollar exposure during the test period.
-- Isolation Forest is included as an unsupervised benchmark and performs significantly worse than the supervised models which is expected when labelled fraud data is available.
+At the same recall level of 43.9%:
 
-**Important note:** The Sparkov dataset is synthetic and contains strong fraud patterns that make the problem easier than real-world fraud detection. The performance metrics shown here should therefore be interpreted as an upper-bound demonstration rather than production expectations.
+- XGBoost reaches 99.2% precision
+- Logistic Regression reaches 53.5% precision
+- The SQL rule engine reaches only 17% precision
+
+In simple terms, XGBoost finds the same amount of fraud while producing far fewer false alerts.
+
+Isolation Forest was included as an unsupervised model, meaning it was trained without fraud labels. It performed worse than the supervised models, which is expected because labelled fraud data was available.
+
+> **Important:** The Sparkov dataset is synthetic and contains strong fraud patterns. This makes fraud easier to detect than it would be with real banking data. These results should be viewed as a project demonstration, not as expected performance in a real production system.
 
 ---
 
-## What the data showed (EDA)
+## What the data showed
 
-- **Transaction amount behaviour was the strongest signal.** A per-card amount z-score clearly separates fraudulent and legitimate transactions. Fraudulent transactions average approximately 3.2 standard deviations above a cardholder's normal spending behaviour.
-- **Geographic features produced a documented negative result.** Home-to-merchant distance and impossible-travel speed showed almost no predictive value because merchant coordinates in Sparkov are generated randomly rather than reflecting realistic movement patterns. As a result, `implied_kmh` was removed from the final model matrix.
-- **Velocity and time-based features provided moderate lift.** Fraudulent transactions show slightly higher short-term activity levels, and night-time fraud rates are more than twice daytime fraud rates.
+### Transaction Amount Was the Strongest Signal
+
+A transaction amount z-score was calculated for each card. This measures how unusual a transaction is compared with the cardholder’s normal spending. Fraudulent transactions were, on average, around 3.2 standard deviations above the cardholder’s usual spending behaviour.
+
+### Geographic Features Were Not Useful
+
+The following geographic features showed very little value:
+- Distance between the cardholder and merchant
+- Estimated travel speed between transactions
+
+This happened because the merchant locations in the Sparkov dataset were randomly generated and did not represent realistic travel patterns. Because of this, `implied_kmh` was removed from the final model. This is still an important result because it shows that features should be tested before being included in a model.
+
+### Time and Transaction Speed Added Some Value
+
+Fraudulent cards showed slightly more short-term transaction activity. The data also showed that the fraud rate at night was more than twice the fraud rate during the day.
 
 ---
 
@@ -68,29 +125,50 @@ The machine-learning models are evaluated against a transparent SQL rule engine 
 
 ```mermaid
 flowchart LR
-    A["Sparkov CSV<br/>1.3M transactions"] --> B[("PostgreSQL<br/>staging + curated")]
-    B --> C["SQL feature engineering<br/>txn_features (materialized view)"]
-    C --> D["Rule engine<br/>SQL baseline"]
-    C --> E["XGBoost<br/>Python ML layer"]
+    A["Sparkov CSV<br/>1.3M transactions"] --> B[("PostgreSQL<br/>staging + cleaned data")]
+    B --> C["SQL feature engineering<br/>txn_features view"]
+    C --> D["SQL rule engine<br/>baseline"]
+    C --> E["XGBoost<br/>Python model"]
     D -. benchmark .-> F["Expected-loss scoring<br/>P(fraud) x amount"]
     E --> F
     F --> G["scored.parquet"]
-    G --> H["HTML dashboard<br/>(GitHub Pages)"]
+    G --> H["HTML dashboard<br/>GitHub Pages"]
     G --> I["Tableau Public"]
 ```
 
 **Why SQL-first?**
 
-The rolling transaction-velocity features, card-level amount z-scores, and geographic calculations are all generated inside PostgreSQL through a single materialised view (`sql/03_features.sql`). This approach highlights advanced SQL feature-engineering skills, keeps the pipeline reproducible, and ensures Python focuses purely on machine-learning tasks rather than data preparation.
+The main features are created inside PostgreSQL using the materialised view in `sql/03_features.sql`
+
+These features include:
+
+- Recent transaction activity
+- Card-level transaction amount z-scores
+- Geographic calculations
+- Time-based features
+
+Using PostgreSQL for feature engineering:
+
+- Keeps large data processing inside the database
+- Makes the process easier to repeat
+- Demonstrates advanced SQL skills
+- Allows Python to focus on machine learning and scoring
 
 ---
 
 ## Tech stack
 
-- **Database:** PostgreSQL 17 (schema, SQL feature engineering, rule engine)
-- **ML / Python:** pandas, scikit-learn, XGBoost, LightGBM, SQLAlchemy
-- **Dashboards:** Plotly.js + vanilla JavaScript (custom HTML dashboard), Tableau Public
-- **Data:** Sparkov synthetic credit-card transactions (1.3M rows, Jan 2019 – Jun 2020)
+| Category | Tools |
+| -------------- | ---------------------------- |
+| Database | PostgreSQL 17 |
+| Programming language | Python 3.11 |
+| Machine learning | XGBoost, LightGBM, scikit-learn |
+| Data processing | pandas, SQLAlchemy |
+| Web dashboard | Plotly.js, HTML, CSS, JavaScript |
+| Business intelligence | Tableau Public |
+| Dataset | Sparkov synthetic credit-card transactions |
+
+The dataset contains around 1.3 million transactions from January 2019 to June 2020.
 
 ---
 
@@ -103,15 +181,15 @@ fraud-risk-intelligence-platform/
 │   ├── raw/                            # fraudTrain.csv (gitignored, downloaded from Kaggle)
 │   └── processed/                      # scored.parquet
 │
-├── models/                             # saved trained ML model
+├── models/                             # saved trained ML model (XGBoost)
 │   └── xgb_fraud.pkl
 │
 ├── notebooks/ 
 │   ├── 01_eda.ipynb                    # EDA (signal vs no-signal per feature family)
-│   └── 02_model_dev.ipynb              # narrated model bake-off + PR curves
+│   └── 02_model_dev.ipynb              # model comparison and PR curves
 │
 ├── sql/
-│   ├── 01_schema.sql                   # database schema and table creation
+│   ├── 01_schema.sql                   # creates the database tables
 │   ├── 02_load.sql                     # data loading and ingestion scripts
 │   ├── 03_features.sql                 # SQL feature engineering pipeline
 │   ├── 04_rules.sql                    # rule-based fraud detection engine
@@ -164,20 +242,23 @@ cd fraud-risk-intelligence-platform
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Create the database and point .env at it
-#    (copy .env.example to .env and set DATABASE_URL)
+# 2. Create the PostgreSQL database
 createdb fraud_detection
+
+# Copy the example environment file
 cp .env.example .env
-#      Then edit .env with your local PostgreSQL credentials. The expected DATABASE_URL format is shown in .env.example 
 
-# 3. Load the connection string from .env into your shell, so psql can read it
-#    (.env on its own is only read by the Python code, not the shell)
-set -a; source .env; set +a
+# Add your PostgreSQL connection details to the .env file. The expected DATABASE_URL format is shown in .env.example 
 
-# 4. Download fraudTrain.csv from Kaggle into data/raw/
-#    https://www.kaggle.com/datasets/kartik2112/fraud-detection
+# 3. Load the database connection into the terminal
+set -a
+source .env
+set +a
 
-# 5. Build the database (run the SQL files in order)
+# 4. Download fraudTrain.csv from Kaggle and place it in data/raw/
+# https://www.kaggle.com/datasets/kartik2112/fraud-detection
+
+# 5. Run the SQL files in order
 psql "$DATABASE_URL" -f sql/01_schema.sql
 psql "$DATABASE_URL" -f sql/02_load.sql
 psql "$DATABASE_URL" -f sql/03_features.sql
@@ -192,28 +273,56 @@ python src/risk.py         # scores the test set → data/processed/scored.parqu
 python export_web.py       # → dashboard/data.js   (then open dashboard/index.html)
 python prep_tableau.py     # → tableau_data/*.csv  (for the Tableau workbook)
 ```
+After running `export_web.py`, open `dashboard/index.html` to view the local dashboard.
 
-The notebooks read live from PostgreSQL through `src/`, so run them with the database up and the venv active.
+The notebooks connect directly to PostgreSQL through the files in `src/`. Make sure the database is running and the Python environment is active before opening them.
 
 ---
 
 ## Dashboards
-**HTML dashboard (operational).** A single-screen risk console with KPI cards, an alert-budget curve, an expected-loss-ranked alert queue, and analytics tiles. Built with Plotly.js and vanilla JS, hosted free on GitHub Pages. This is the primary, always-on artifact.
+
+### Operational HTML Dashboard
+
+The main dashboard is a single-screen fraud investigation console built with Plotly.js and JavaScript.
+
+It includes:
+
+- Model performance KPIs
+- Alert budget analysis
+- Recall and precision comparisons
+- Expected-loss alert rankings
+- Fraud trends
+- Transaction category and amount patterns
+- A queue of transactions for investigators to review
+
+The dashboard is hosted on GitHub Pages and can be opened using the live dashboard link above.
 
 ![Alert queue ranked by expected loss](screenshots/dashboard_expected_loss.png)
 <p align="center">
   <sub><em>
-  Live HTML fraud-risk dashboard showing the 198,982-transaction hold-out scored by XGBoost, with KPIs, recall–precision tradeoffs, fraud patterns and an analyst alert queue. Switching from fraud probability to expected loss highlights high-value transactions where lower model certainty can still create greater financial risk.
+    The dashboard shows 198,982 test transactions scored by XGBoost. Alerts can be ranked by fraud probability or expected loss. Expected-loss ranking gives more importance to high-value transactions, even when their fraud probability is slightly lower.
   </em></sub>
 </p>
 
 
-**Tableau Public (analytical).** The same results explored as an interactive BI dashboard: feature importance, fraud rate by category and amount, the confusion matrix, and temporal patterns.
+### Tableau Public Dashboard
+
+The Tableau dashboard provides a more detailed view of the same model results.
+
+It includes:
+
+- Model performance
+- Feature importance
+- Confusion matrix results
+- Fraud rates by category and amount
+- Risk-level groups
+- Fraud probability ranges
+- Fraud patterns by hour, day and time period
 
 ![Tableau Public dashboard](screenshots/tableau_dashbaord.png)
 <p align="center">
   <sub><em>
-  Tableau Public view of the same scored fraud data, summarizing model performance, feature importance, confusion matrix results, risk-level segmentation, probability bins and fraud patterns by category, amount, hour, day and time period.
+    The Tableau dashboard explores model results, important features, fraud patterns, risk levels and transaction behaviour across different categories and time periods.
   </em></sub>
 </p>
 
@@ -221,6 +330,14 @@ The notebooks read live from PostgreSQL through `src/`, so run them with the dat
 
 ## Dataset & acknowledgements
 
-Data: the [Sparkov synthetic credit-card transaction dataset](https://www.kaggle.com/datasets/kartik2112/fraud-detection) (Kaggle, `kartik2112/fraud-detection`), contains **1,296,675 transactions** from Jan 2019 to Jun 2020 with an overall fraud rate of approximately **0.58%**. The data is entirely **synthetic**, meaning all performance results should be interpreted within that context.
+Data: the [Sparkov synthetic credit-card transaction dataset](https://www.kaggle.com/datasets/kartik2112/fraud-detection) (Kaggle, `kartik2112/fraud-detection`)
+
+The dataset contains:
+
+- **1,296,675 transactions**
+- Transactions from January 2019 to June 2020
+- An overall fraud rate of approximately **0.58%**
+
+The dataset is completely synthetic. This means the model results should only be understood within the limits of this dataset and should not be treated as expected performance on real banking data.
 
 ---
